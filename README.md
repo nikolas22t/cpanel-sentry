@@ -25,7 +25,7 @@ or cPanel access.**
 ## Install
 
 ```bash
-git clone https://github.com/<you>/cpanel-sentry.git
+git clone https://github.com/nikolas22t/cpanel-sentry.git
 cd cpanel-sentry
 sudo bash install.sh
 ```
