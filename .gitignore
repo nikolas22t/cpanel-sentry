@@ -1,0 +1,7 @@
+*.log
+rollback.*
+pre-sentry.rules
+portal.pass
+state/
+._*
+.DS_Store

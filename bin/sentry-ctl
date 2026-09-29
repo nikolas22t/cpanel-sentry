@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# cPanel Sentry — management CLI.
+#   sentry-ctl status
+#   sentry-ctl block <ip> | unblock <ip>
+#   sentry-ctl allow <ip> | unallow <ip>       (whitelist)
+#   sentry-ctl hits [N]                          (recent honeypot catches)
+#   sentry-ctl list-blocked | list-allowed
+set -euo pipefail
+SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${LIB_DIR:-/usr/local/cpanel-sentry}/lib/common.sh" 2>/dev/null || source "$SELF/../lib/common.sh"
+sentry_load_conf; need_root
+touch "$WHITELIST_FILE" "$BLOCKLIST_FILE"
+cmd="${1:-status}"; arg="${2:-}"
+
+case "$cmd" in
+  block)    [[ -n "$arg" ]] && sentry_block_ip "$arg" "manual" && ok "blocked $arg" ;;
+  unblock)  [[ -n "$arg" ]] && sentry_unblock_ip "$arg" && ok "unblocked $arg" ;;
+  allow)
+    valid_ip "$arg" || { err "invalid ip"; exit 1; }
+    grep -qxF "$arg" "$WHITELIST_FILE" || echo "$arg" >> "$WHITELIST_FILE"
+    sentry_unblock_ip "$arg"   # ensure it isn't currently blocked
+    ok "whitelisted $arg" ;;
+  unallow)  sed -i "\#^${arg}\$#d" "$WHITELIST_FILE"; ok "removed $arg from whitelist" ;;
+  list-blocked)  echo "== blocked =="; cat "$BLOCKLIST_FILE" ;;
+  list-allowed)  echo "== allowed =="; cat "$WHITELIST_FILE" ;;
+  hits)
+    n="${arg:-20}"; echo "== last $n honeypot hits =="
+    [[ -f "$HITS_LOG" ]] && tail -n "$n" "$HITS_LOG" | while read -r l; do
+      echo "$l" | sed -E 's/.*"ts":"([^"]*)".*"ip":"([^"]*)".*"type":"([^"]*)".*"host":"([^"]*)".*"uri":"([^"]*)".*/[\1] \2  \3  \4\5/'
+    done ;;
+  status)
+    echo "== $BRAND_NAME status =="
+    echo "Firewall INPUT policy : $(iptables -S 2>/dev/null | grep '^-P INPUT' | awk '{print $3}')"
+    echo "SSH allowlist         : $(iptables -S INPUT 2>/dev/null | grep -c 'dport 22 -s\|-s.*dport 22') rules"
+    echo "Blocked IPs           : $(wc -l < "$BLOCKLIST_FILE" 2>/dev/null || echo 0)"
+    echo "Whitelisted IPs       : $(wc -l < "$WHITELIST_FILE" 2>/dev/null || echo 0)"
+    echo "Honeypot dirs         : $(wc -l < "$STATE_DIR/honeypots.manifest" 2>/dev/null || echo 0)"
+    echo "Honeypot hits logged  : $(wc -l < "$HITS_LOG" 2>/dev/null || echo 0)"
+    echo "Block engine cron     : $(crontab -l 2>/dev/null | grep -c sentry-blocklistd) entry"
+    ;;
+  *) echo "usage: sentry-ctl {status|block|unblock|allow|unallow|hits|list-blocked|list-allowed} [arg]"; exit 1 ;;
+esac

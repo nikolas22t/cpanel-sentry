@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+# cPanel Sentry — block engine. Run every minute by cron.
+#  * consumes honeypot spool hits from every account's .sentry/spool
+#  * blocks non-whitelisted IPs that reach BLOCK_THRESHOLD within BLOCK_WINDOW
+#  * expires blocks after BLOCK_TTL (if set)
+#  * keeps each account's .sentry/whitelist.txt in sync
+set -euo pipefail
+SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${LIB_DIR:-/usr/local/cpanel-sentry}/lib/common.sh" 2>/dev/null || source "$SELF/../lib/common.sh"
+sentry_load_conf
+need_root
+mkdir -p "$STATE_DIR" "$LOG_DIR"
+HITDB="$STATE_DIR/hit-counts.tsv"     # ip <tab> firstts <tab> count
+BLOCKTS="$STATE_DIR/block-times.tsv"  # ip <tab> blockts
+touch "$HITDB" "$BLOCKTS" "$WHITELIST_FILE" "$BLOCKLIST_FILE"
+
+now=$(date +%s)
+
+# ---- 1. sync whitelist to each honeypot dir --------------------------
+if [[ -f "$STATE_DIR/honeypots.manifest" ]]; then
+  while read -r sdir; do
+    [[ -d "$sdir" ]] || continue
+    cp -f "$WHITELIST_FILE" "$sdir/whitelist.txt" 2>/dev/null || true
+    owner=$(stat -c '%U' "$(dirname "$sdir")" 2>/dev/null); [[ -n "$owner" ]] && chown "$owner":"$owner" "$sdir/whitelist.txt" 2>/dev/null || true
+  done < "$STATE_DIR/honeypots.manifest"
+fi
+
+# ---- 2. consume spool hits ------------------------------------------
+consume_dir() {
+  local spool="$1" f ip
+  [[ -d "$spool" ]] || return 0
+  for f in "$spool"/*.json; do
+    [[ -e "$f" ]] || continue
+    ip=$(grep -oE '"ip":"[^"]+"' "$f" 2>/dev/null | head -1 | cut -d'"' -f4)
+    # append full record to central evidence log, then remove spool file
+    cat "$f" >> "$HITS_LOG" 2>/dev/null || true
+    rm -f "$f"
+    [[ -n "$ip" ]] || continue
+    valid_ip "$ip" || continue
+    is_whitelisted "$ip" && continue
+    # update rolling count
+    local line first count
+    line=$(grep -P "^\Q$ip\E\t" "$HITDB" 2>/dev/null | head -1 || true)
+    if [[ -n "$line" ]]; then
+      first=$(echo "$line" | cut -f2); count=$(echo "$line" | cut -f3)
+      if (( now - first > BLOCK_WINDOW )); then first=$now; count=0; fi
+      count=$((count+1))
+      sed -i "\#^$ip\t#d" "$HITDB"
+    else
+      first=$now; count=1
+    fi
+    printf '%s\t%s\t%s\n' "$ip" "$first" "$count" >> "$HITDB"
+    if (( count >= BLOCK_THRESHOLD )); then
+      if ! grep -qxF "$ip" "$BLOCKLIST_FILE"; then
+        sentry_block_ip "$ip" "honeypot x$count"
+        printf '%s\t%s\n' "$ip" "$now" >> "$BLOCKTS"
+      fi
+    fi
+  done
+}
+
+if [[ -f "$STATE_DIR/honeypots.manifest" ]]; then
+  while read -r sdir; do consume_dir "$sdir/spool"; done < "$STATE_DIR/honeypots.manifest"
+fi
+
+# ---- 3. expire blocks past TTL --------------------------------------
+if [[ "${BLOCK_TTL:-0}" -gt 0 && -s "$BLOCKTS" ]]; then
+  tmp="$(mktemp)"
+  while IFS=$'\t' read -r ip ts; do
+    [[ -n "$ip" ]] || continue
+    if (( now - ts >= BLOCK_TTL )); then
+      sentry_unblock_ip "$ip"; log "TTL expired, unblocked $ip"
+    else
+      printf '%s\t%s\n' "$ip" "$ts" >> "$tmp"
+    fi
+  done < "$BLOCKTS"
+  mv "$tmp" "$BLOCKTS"
+fi
+exit 0

@@ -1,0 +1,69 @@
+# =====================================================================
+#  cPanel Sentry — configuration
+#  Copied to /etc/cpanel-sentry/sentry.conf by install.sh.
+#  All values are chosen interactively during installation; edit here
+#  afterwards and re-run `sentry-apply` to change them.
+# =====================================================================
+
+# --- Branding (white-label) -----------------------------------------
+BRAND_NAME="cPanel Sentry"
+BRAND_TAG="Server protection"
+
+# --- SSH / management allowlist -------------------------------------
+# Space-separated IPv4/IPv6 addresses or CIDRs allowed to reach SSH (22)
+# and, optionally, WHM/cPanel management ports. NEVER leave empty.
+ALLOW_IPS=""
+
+# Restrict SSH (port 22) inbound AND outbound to ALLOW_IPS (recommended).
+LOCK_SSH=1
+
+# Also restrict WHM/cPanel management ports (2086/2087/2083/2096/whostmgr)
+# to ALLOW_IPS. Leave 0 if resellers/customers need panel access from anywhere.
+LOCK_PANEL=0
+
+# --- Firewall -------------------------------------------------------
+# 1 = switch INPUT policy to DROP and allowlist detected customer/service
+#     ports (websites, mail, ftp, dns, cpanel all stay open).
+# 0 = keep INPUT ACCEPT, only add the block/allow rules (less strict).
+ENABLE_FIREWALL=1
+
+# Extra inbound TCP/UDP ports to keep open (space separated), on top of
+# the ports Sentry auto-detects as actively listening.
+EXTRA_TCP_PORTS=""
+EXTRA_UDP_PORTS=""
+
+# Seconds before an automatic rollback undoes a new ruleset unless
+# confirmed. Protects against lock-out. 0 disables the safety net.
+ROLLBACK_SECONDS=180
+
+# --- Auto-block engine ----------------------------------------------
+# An IP is blocked after it triggers this many honeypot/abuse hits
+# within BLOCK_WINDOW seconds.
+BLOCK_THRESHOLD=1
+BLOCK_WINDOW=3600
+# 0 = permanent block, or number of seconds to keep the block.
+BLOCK_TTL=0
+
+# --- Honeypots ------------------------------------------------------
+# Deploy fake wp-login / Joomla administrator traps to accounts that do
+# NOT run a real WordPress/Joomla there. Real admin paths are detected
+# and never overwritten.
+ENABLE_HONEYPOTS=1
+# Where account docroots live (cPanel default).
+HOME_ROOT="/home"
+
+# --- Portal ---------------------------------------------------------
+# Admin dashboard to view caught IPs and manage the allow/block lists.
+INSTALL_PORTAL=1
+# Filesystem location of the portal app.
+PORTAL_DIR="/usr/local/cpanel-sentry/portal"
+# URL path the portal is served under (via its own lightweight PHP server).
+PORTAL_URL_PATH="/sentry"
+# TCP port the portal listens on (bound to 127.0.0.1; reach via SSH tunnel
+# or put behind your own proxy). Access is also IP-restricted to ALLOW_IPS.
+PORTAL_PORT=8443
+
+# --- Paths (created by installer) -----------------------------------
+STATE_DIR="/var/lib/cpanel-sentry"      # blocklist, whitelist, db
+LOG_DIR="/var/log/cpanel-sentry"        # hits.log, sentry.log
+LIB_DIR="/usr/local/cpanel-sentry"      # installed code

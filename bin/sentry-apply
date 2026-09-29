@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# cPanel Sentry — (re)apply firewall + ModSecurity from current config.
+#   sentry-apply            apply ruleset (arms auto-rollback)
+#   sentry-apply --confirm  cancel the auto-rollback (keep the ruleset)
+set -euo pipefail
+SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LIBD="${LIB_DIR:-/usr/local/cpanel-sentry}"
+source "$LIBD/lib/common.sh" 2>/dev/null || source "$SELF/../lib/common.sh"
+sentry_load_conf
+
+if [[ "${1:-}" == "--confirm" ]]; then
+  source "$LIBD/lib/firewall.sh"; fw_cancel_rollback; exit 0
+fi
+
+source "$LIBD/lib/firewall.sh"
+source "$LIBD/lib/modsec.sh"
+fw_apply
+modsec_apply || true
